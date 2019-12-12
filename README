@@ -138,3 +138,335 @@ AVAILABILITY
 The main web site for rsync is http://rsync.samba.org/
 The main ftp site is ftp://rsync.samba.org/pub/rsync/
 This is also available as rsync://rsync.samba.org/rsyncftp/
+Objective:
+=========== 
+ 1. Do a dry run and generate a list of files that are not present at node0
+ 2. Take a Full backup of 192.168.9.11/client/dir1 with File name, size, checksum
+*3. Do a dry run and generate a list of files that have changed*
+*4. Check if rsync can take as an input, a list of files that need to be transferred, instead of checking for diffs itself.*
+ 5. If so, feed the file list from step 1 into the rsync command that you have found in step2.
+
+
+
+
+ ________________	        ________________
+ |		|		|	       |
+ |   node0	|		|    node1     |
+ | 192.168.9.1  |		| 192.168.9.11 |
+ |______________|		|______________|
+	|			       |
+	|	   192.168.9.0/24      | 
+      enp0s8-------------------------enp0s8
+
+
+enp0s8 =  Speed: 1000Mb/s |  node0 = Backup server { rsync installed }
+	  Duplex: Full    |  node1 = client { rsync installed }
+
+At node1
+========
+/client/dir1/
+Total File = 200 ; Each file = 12K ; Total Size of file = 2.4 MB 
+
+Using
+=====
+for i in {1..200}; do dd if=/dev/urandom of=/client/dir1/file$i.txt bs=12K count=1 &> /dev/null; done
+du -sh /client
+
+At node0
+========
+/test/backup/
+Total File = 0 ; Each file = 0 ; Total Size of file = 0
+
+
+
+Test cases:
+===========
+
+case 1 :Do a dry run and generate a list of files that are not present at node0 from node0
+========
+Status: node0 = 0 files; node1 =  200 files with 2.4 MB size
+
+At node0 executed: rsync --out-format='%i file:%f size:%l Checksum:%C' -aincv .  root@192.168.9.11:/client/dir1
+OUTPUT
+=======
+sending incremental file list
+.d..t...... file:. size:6 Checksum:                                
+
+sent 43 bytes  received 19 bytes  17.71 bytes/sec
+total size is 0  speedup is 0.00 (DRY RUN)
+
+At node1 executed: rsync --out-format='%i file:%f size:%l Checksum:%C' -aincv .  root@192.168.9.1:/test/backup
+OUTPUT
+=======
+<f+++++++++ file:file1.txt size:12288 Checksum:00000000000000000000000000000000
+<f+++++++++ file:file2.txt size:12288 Checksum:00000000000000000000000000000000
+<f+++++++++ file:file3.txt size:12288 Checksum:00000000000000000000000000000000
+
+Conclusion:
+Since there was no file at node0 hence rsync unable to do maths & comparison with node1/client files.
+same for at node1 since it unable to do checksum calculation since it does not found any comparison file for node0.
+Also, from the observation checksum was 000,Hence checksum maths do only when it found the comparison.
+
+
+============
+node0 =  backup, Total File = 1 ; Each file = 12K ; Total Size of file = 12K
+ending incremental file list
+.d..t...... file:. size:23 Checksum:                                
+.f..t...... file:file1.txt size:12288 Checksum:4e5ee72946cb092aef2e6b9e3bdc6d39
+
+node1 = client, Total File = 200; Each file = 12K; Total Size of file = 2.4 MB, Backup = 1{ file1.txt }
+
+sending incremental file list
+.d..t...... File:. size:8192 Checksum:                                
+.f..t...... File:file1.txt size:12288 Checksum:4e5ee72946cb092aef2e6b9e3bdc6d39
+<f+++++++++ File:file2.txt size:12288 Checksum:00000000000000000000000000000000
+<f+++++++++ File:file3.txt size:12288 Checksum:00000000000000000000000000000000
+<f+++++++++ File:file4.txt size:12288 Checksum:00000000000000000000000000000000
+
+
+Case 2:  Take a Full backup of 192.168.9.11/client/dir1 with File name, size, checksum
+=======  After Full backup
+	
+Full backup
+===========
+rsync --out-format='%i file:%f size:%l Checksum:%C' -aAXv --progress  root@192.168.9.11:/client/dir1  /test/backup
+
+OUTPUT:
+receiving incremental file list
+cd+++++++++ file:dir1 size:8192 Checksum: 
+
+dir1/file1.txt
+12,288 100%   11.72MB/s    0:00:00 (xfr#1, to-chk=199/201)
+>f+++++++++ file:dir1/file1.txt size:12288 Checksum:4e5ee72946cb092aef2e6b9e3bdc6d39
+
+dir1/file10.txt
+12,288 100%   11.72MB/s    0:00:00 (xfr#2, to-chk=198/201)
+>f+++++++++ file:dir1/file10.txt size:12288 Checksum:5566d14f43bf2b5843d37aa6aae43734
+
+dir1/file100.txt
+12,288 100%   11.72MB/s    0:00:00 (xfr#3, to-chk=197/201)
+>f+++++++++ file:dir1/file100.txt size:12288 Checksum:c70dc6caa8d8f23a9cf4d1735ee41bba
+
+dir1/file101.txt
+12,288 100%  857.14kB/s    0:00:00 (xfr#4, to-chk=196/201)
+>f+++++++++ file:dir1/file101.txt size:12288 Checksum:cf4ab7613fb118159d6f8094a6d13f4d
+
+dir1/file102.txt
+12,288 100%  857.14kB/s    0:00:00 (xfr#5, to-chk=195/201)
+>f+++++++++ file:dir1/file102.txt size:12288 Checksum:edb7dfc06222ac4f4f59b1f08a0193ad
+.
+.
+.
+
+dir1/file97.txt
+12,288 100%   54.55kB/s    0:00:00 (xfr#198, to-chk=2/201)
+>f+++++++++ file:dir1/file97.txt size:12288 Checksum:f310652ea8f837d468ca7e3719eadc48
+
+
+dir1/file98.txt
+12,288 100%   54.55kB/s    0:00:00 (xfr#199, to-chk=1/201)
+>f+++++++++ file:dir1/file98.txt size:12288 Checksum:2a0f09a51c3823e054cd1c979b92a4cb
+
+dir1/file99.txt
+12,288 100%   54.55kB/s    0:00:00 (xfr#200, to-chk=0/201)
+>f+++++++++ file:dir1/file99.txt size:12288 Checksum:07e780363dde6df96806cd68d7306227
+
+CONCLUSION:
+Successful full backup ; node0/backup/dir1 = node1/client/dir1 = 2.4MB size
+
+
+
+
+Case 2: Do a dry run and generate a list of files that have changed.
+======
+*Prerequisite*
+Let's assume there is an updation of 6K in odd sequence of file at client side.
+Using below script
+Status: node0 = 200 files with size = 2.4 MB
+        node1 = 200 files with size = 3.2 MB
+
+
+rsync --out-format='%i %f ' -aincv   .    root@192.168.9.1:/test/backup/dir1 | awk '/file/{print $2} END {printf( "Total size %s\n",NR-5) }'
+
+
+rsync --out-format='%i %f ' -aincv   .    root@192.168.9.1:/test/backup/dir1 | awk '/file/{print $2}'
+
+
+=================
+
+rsync -av --files-from=/client/foo.list  /client/dir1/   root@192.168.9.1:/test/backup/dir1  
+
+building file list ... 
+rsync: link_stat "/client/dir1/incremental" failed: No such file or directory (2)
+done
+
+sent 1,831 bytes  received 12 bytes  526.57 bytes/sec
+total size is 1,855,488  speedup is 1,006.78
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1178) [sender=3.1.2]
+
+
+
+
+
+
+
+
+Use full scripts
+====================
+1. Finding odd numbers{ to updating 200 file }
+#!/usr/bin/env bash
+for i in {1..200};
+do
+if [ $(($i % 2)) != 0 ]
+then 
+        echo $i
+        #dd if=/dev/urandom of=/client/file$i.txt bs=6K count=1 oflag=append conv=notrunc &> /dev/null;
+fi
+done
+
+OUTPUT
+#updated 6K to the following files
+file1.txt file3.txt file5.txt file7.txt file9.txt
+file11.txt file13.txt file15.txt file17.txt file19.txt 
+file21.txt file23.txt file25.txt file27.txt file29.txt 
+file31.txt file33.txt file35.txt file37.txt file39.txt 
+file41.txt file43.txt file45.txt file47.txt file49.txt 
+file51.txt file53.txt file55.txt file57.txt file59.txt 
+file61.txt file63.txt file65.txt file67.txt file69.txt 
+file71.txt file73.txt file75.txt file77.txt file79.txt 
+file81.txt file83.txt file85.txt file87.txt file89.txt 
+file91.txt file93.txt file95.txt file97.txt file99.txt 
+file101.txt file103.txt file105.txt file107.txt file109.txt 
+file111.txt file113.txt file115.txt file117.txt file119.txt 
+file121.txt file123.txt file125.txt file127.txt file129.txt 
+file131.txt file133.txt file135.txt file137.txt file139.txt 
+file141.txt file143.txt file145.txt file147.txt file149.txt 
+file151.txt file153.txt file155.txt file157.txt file159.txt 
+file161.txt file163.txt file165.txt file167.txt file169.txt 
+file171.txt file173.txt file175.txt file177.txt file179.txt 
+file181.txt file183.txt file185.txt file187.txt file189.txt 
+file191.txt file193.txt file195.txt file197.txt file199.txt
+
+READING OUTPUT FORMAT
+======================
+The  "%i" escape has a cryptic output that is 11 letters long. eg
+General format is
+Y X c s t p o g u a  x
+1 2 3 4 5 6 7 8 9 10 11
+
+eg, below
+. d . . t . . . . .  .   # cryptic output
+. f . . t . . . . .  .   # cryptic output
+< f + + + + + + + +  +   # cryptic output
+1 2 3 4 5 6 7 8 9 10 11
+
+
+1 = Y = is replaced by the type of update being done.
+2 = X = is replaced by the file-type.
+
+and the other letters(3=c,4=s,5=t,6=p,7=o,8=g,9=u,10=a,11=x)  represent  attributes that may be output if they are being modified.
+ The update types that replace the Y are as follows i.e 1 = Y
+< means that a file is being transferred to the remote host (sent).
+> means that a file is being transferred to the local host (received).
+c means that a local change/creation is occurring for the item (such as the creation of a directory or the chang‐
+                     ing of a symlink, etc.).
+h means that the item is a hard link to another item (requires --hard-links).
+. means that the item is not being updated (though it might have attributes that are being modified).
+* means that the rest of the itemized-output area contains a message (e.g. "deleting").
+
+
+The file-types that replace the X = 2 are:
+
+f     for a file, 
+d     for a directory 
+L     for a symlink,  
+D     for a device,  
+S     for a special file (e.g. named sockets and fifos)
+
+The  other letters (3=c,4=s,5=t,6=p,7=o,8=g,9=u,10=a,11=x) in the string above are the actual letters that will be output
+"."   for no change.
+
+Three exceptions to this are
+1.  "+"   newly created item replaces each letter
+2.  an identical item replaces the dots with *spaces*
+3.  "?"   unknown attribute replaces each letter
+
+The other letters(3=c,4=s,5=t,6=p,7=o,8=g,9=u,10=a,11=x)  represent  attributes is associated with each letter is as follows:
+c  means either that a regular file has a different checksum (requires --checksum) or that a symlink,  device,  or
+   special  file has a changed value.  Note that if you are sending files to an rsync prior to 3.0.1, this change flag
+   will be present only for checksum-differing regular files.
+
+s means the size of a regular file is different and will be updated by the file transfer.
+
+t means the modification time is different and is being updated to the sender’s  value  (requires  --times).   An
+  alternate  value  of  T  means  that  the  modification time will be set to the transfer time, which happens when a
+  file/symlink/device is updated without --times and when a symlink is changed and the receiver can’t set  its  time.
+  (Note:  when using an rsync 3.0.0 client, you might see the s flag combined with t instead of the proper T flag for
+g means the group is different and is being updated to the sender’s value (requires --group and the authority to set the group).
+
+u slot is reserved for future use.
+
+a means that the ACL information changed.
+
+x means that the extended attribute information changed.
+
+--out-format=FORMAT
+====================
+This allows you to specify exactly what the rsync client outputs to the user on a per-update basis.  The format is a  text
+string  containing embedded single-character escape sequences prefixed with a percent (%) character.   A default format of
+"%n%L" is assumed if either --info=name or -v is specified (this tells you just the name of the file and, if the item is a
+link,  where  it  points).   For  a  full  list  of  the  possible  escape characters, see the "log format" setting in the
+rsyncd.conf manpage.
+%i = --itemize-changes
+Specifying the --out-format option implies the --info=name option, which will mention  each  file,  dir,  etc.  that  gets
+updated  in  a  significant way (a transferred file, a recreated symlink/device, or a touched directory).  In addition, if
+the itemize-changes escape (%i) is included in the string (e.g. if the --itemize-changes option was used), the logging  of
+names increases to mention any item that is changed in any way (as long as the receiving side is at least 2.6.4).  See the
+--itemize-changes option for a description of the output of "%i".
+
+
+Rsync will output the out-format string prior to a file’s  transfer  unless  one  of  the  transfer-statistic  escapes  is
+requested,  in  which case the logging is done at the end of the file’s transfer.  When this late logging is in effect and
+--progress is also specified, rsync will also output the name of the file being transferred prior to its progress information 
+(followed, of course, by the out-format output).
+
+--itemize-changes --- man rsyncd.conf ---
+
+log format 
+
+This  parameter  allows  you  to specify the format used for logging file transfers when transfer logging is enabled.  The
+format is a text string containing embedded single-character escape sequences prefixed with a percent (%)  character.   An
+optional  numeric field width may also be specified between the percent and the escape letter (e.g. "%-50n %8l %07p").  In
+addition, one or more apostrophes may be specified prior to a numerical escape to indicate that the numerical value should
+be  made more human-readable.  The 3 supported levels are the same as for the --human-readable command-line option, though
+the default is for human-readability to be off.  Each added apostrophe increases the level (e.g. "%''l %'b %f").
+
+
+The default log format is "%o %h [%a] %m (%u) %f %l", and a "%t [%p] " is always prefixed when using the "log file" parameter.  
+(A perl script that will summarize this default log format is included in the rsync source code distribution in the "support" subdirectory: rsyncstats.)
+
+The single-character escapes that are understood are as follows:
+
+%a the remote IP address (only available for a daemon)
+%b the number of bytes actually transferred
+%B the permission bits of the file (e.g. rwxrwxrwt)
+%c the total size of the block checksums received for the basis file (only when sending)
+%C the full-file MD5 checksum if --checksum is enabled or a file was transferred (only for protocol 30 or above).
+%f the filename (long form on sender; no trailing "/")
+%G the gid of the file (decimal) or "DEFAULT"
+%h the remote host name (only available for a daemon)
+%i an itemized list of what is being updated
+%l the length of the file in bytes
+%L the string " -> SYMLINK", " => HARDLINK", or "" (where SYMLINK or HARDLINK is a filename)
+%m the module name
+%M the last-modified time of the file
+%n the filename (short form; trailing "/" on dir)
+%o the operation, which is "send", "recv", or "del." (the latter includes the trailing period)
+%p the process ID of this rsync session
+ %P the module path
+%t the current date time
+%u the authenticated username or an empty string
+%U the uid of the file (decimal)
+
+
+
